@@ -2,5 +2,9 @@ Flask==3.0.0
 Flask-SocketIO==5.3.6
 eventlet==0.36.1
 gunicorn==21.2.0
+
+python-socketio==5.11.3
+python-engineio==4.9.1
+
 qrcode==7.4.2
-Pillow
+Pillow==10.4.0
