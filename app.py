@@ -1,7 +1,3 @@
-import eventlet
-eventlet.monkey_patch()
-
-import os
 import socket as socket_lib
 import logging
 import threading
@@ -13,12 +9,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'livingreading-dev-only')
+app.config['SECRET_KEY'] = 'livingreading2025'
 
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='eventlet',
+    async_mode='threading',
     ping_timeout=60,
     ping_interval=25
 )
@@ -743,7 +739,7 @@ def on_new_round():
 
 
 if __name__ == '__main__':
-    port     = int(os.environ.get('PORT', 5050))
+    port     = 5050
     local_ip = get_local_ip()
     print('\n' + '═' * 50)
     print('  LIVING READING — Local Server')
