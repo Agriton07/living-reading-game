@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Living Reading</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body {
+  font-family: 'Georgia', serif;
+  background: #0e0e0e;
+  color: #f0ede6;
+  min-height: 100vh;
+  overflow-x: hidden;
+  position: relative;
+}
+h1,h2,.garamond { font-family: 'EB Garamond', serif; }
+
+/* ── SCREENS ──────────────────────────────────────── */
+.screen {
+  position: absolute; top: 0; left: 0;
+  width: 100%; min-height: 100vh;
+  padding: 2.5rem 1.5rem 2rem;
+  display: flex; flex-direction: column;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+.screen.active { opacity: 1; pointer-events: auto; position: relative; }
+
+/* ── TYPOGRAPHY ───────────────────────────────────── */
+.eyelet {
+  font-size: 10px; letter-spacing: 0.28em;
+  text-transform: uppercase; color: #444; margin-bottom: 0.5rem;
+}
+.title { font-size: 30px; font-weight: 400; line-height: 1.25; margin-bottom: 0.5rem; }
+.sub   { font-size: 14px; color: #666; line-height: 1.7; }
+
+/* ── THEME MISSION BANNER ─────────────────────────── */
+.theme-mission {
+  display: none;
+  background: #130f05;
+  border: 1px solid #3a2c12;
+  border-radius: 100px;
+  padding: 7px 18px;
+  font-size: 12px;
+  color: #a07828;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.theme-mission strong { color: #c9a84c; font-weight: normal; font-style: italic; font-size: 14px; }
+
+/* ── BUTTONS ──────────────────────────────────────── */
+.btn {
+  background: #f0ede6; color: #0e0e0e; border: none;
+  padding: 15px 28px; font-size: 15px; font-family: inherit;
+  border-radius: 100px; cursor: pointer;
+  width: 100%; text-align: center; letter-spacing: 0.03em;
+  transition: transform 0.15s, opacity 0.2s;
+  margin-top: auto; flex-shrink: 0;
+}
+.btn:active { transform: scale(0.96); }
+.btn-ghost {
+  background: transparent; color: #444; border: 1px solid #1e1e1e;
+  padding: 10px 20px; font-size: 13px; font-family: inherit;
+  border-radius: 100px; cursor: pointer; letter-spacing: 0.04em;
+  transition: border-color 0.2s, color 0.2s; flex-shrink: 0;
+}
+.btn-ghost:active { color: #777; border-color: #333; }
+
+/* ── NAME SCREEN ──────────────────────────────────── */
+#s-name { align-items: flex-start; justify-content: center; gap: 0.75rem; }
+.name-input {
+  width: 100%; background: #111; border: 1px solid #2a2a2a;
+  border-radius: 12px; padding: 14px 18px;
+  font-size: 18px; font-family: 'EB Garamond', serif; font-style: italic;
+  color: #f0ede6; outline: none; letter-spacing: 0.02em;
+  transition: border-color 0.2s;
+  margin: 0.5rem 0 0.25rem;
+}
+.name-input::placeholder { color: #333; }
+.name-input:focus { border-color: #3a3a3a; }
+.name-hint { font-size: 11px; color: #333; letter-spacing: 0.06em; margin-bottom: 1.5rem; }
+
+/* ── WAITING ──────────────────────────────────────── */
+#s-waiting { align-items: center; justify-content: center; text-align: center; gap: 0.75rem; }
+.pulse-ring {
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 1px solid #1e1e1e;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; color: #333; margin-bottom: 0.75rem;
+  animation: pulseRing 2.5s ease-in-out infinite;
+}
+@keyframes pulseRing {
+  0%,100% { border-color: #1a1a1a; color: #2a2a2a; }
+  50%      { border-color: #333; color: #777; }
+}
+
+/* Playing-as badge */
+.player-name-tag {
+  display: none;
+  font-size: 11px; color: #2e2e2e; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.player-name-tag em { color: #555; font-style: italic; font-size: 13px; }
+
+/* Theme reveal on waiting screen */
+.waiting-theme-reveal {
+  display: none; flex-direction: column;
+  align-items: center; gap: 0.5rem;
+  margin-top: 1rem; padding-top: 1rem;
+  border-top: 1px solid #1a1a1a;
+}
+.waiting-theme-reveal .theme-directive {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 28px; color: #c9a84c;
+  animation: fadeScaleIn 0.6s ease forwards;
+}
+@keyframes fadeScaleIn {
+  from { opacity: 0; transform: scale(0.88); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.waiting-theme-reveal .theme-sub-lbl {
+  font-size: 11px; color: #444; letter-spacing: 0.12em; text-transform: uppercase;
+}
+
+/* ── READ ─────────────────────────────────────────── */
+#s-read { gap: 0; }
+.poem-block {
+  border-left: 1px solid #1c1c1c; padding-left: 1.25rem;
+  margin: 1rem 0 1.25rem; flex: 1; overflow-y: auto; scrollbar-width: none;
+}
+.poem-block::-webkit-scrollbar { display: none; }
+.poem-text { font-size: 17px; line-height: 2.2; color: #999; font-style: italic; }
+
+/* ── ERASE ────────────────────────────────────────── */
+#s-erase { gap: 0; }
+.progress-bar {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: #444; letter-spacing: 0.06em; text-transform: uppercase;
+  padding-bottom: 0.75rem; border-bottom: 1px solid #1a1a1a; margin-bottom: 0.9rem; flex-shrink: 0;
+}
+.progress-bar strong { color: #f0ede6; font-weight: normal; }
+
+.erase-header { margin-bottom: 0.2rem; font-size: 24px; flex-shrink: 0; }
+.erase-sub    { font-size: 12px; color: #444; margin-bottom: 0.9rem; flex-shrink: 0; }
+
+.word-area {
+  flex: 1; font-size: 19px; font-style: italic; line-height: 2.8;
+  padding: 0.25rem 0 0.75rem;
+  overflow-y: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.word-area::-webkit-scrollbar { display: none; }
+
+.w {
+  display: inline-block; padding: 3px 5px; border-radius: 5px;
+  color: #f0ede6; cursor: pointer; user-select: none;
+  transition: all 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  touch-action: manipulation; min-height: 44px; line-height: 2.8;
+}
+.w:active  { transform: scale(0.82); }
+.w.gone    { color: transparent; background: #1a1a1a; transform: scale(0.90); }
+
+.erase-actions {
+  display: flex; flex-direction: column; gap: 0.65rem;
+  padding-top: 0.9rem; flex-shrink: 0;
+}
+.validation-msg {
+  font-size: 12px; color: #a07828; text-align: center;
+  min-height: 1.2em; letter-spacing: 0.04em;
+  transition: opacity 0.3s ease; flex-shrink: 0;
+}
+
+/* ── SENT ─────────────────────────────────────────── */
+#s-sent { gap: 0; }
+.success-ring {
+  width: 52px; height: 52px; border-radius: 50%; border: 1px solid #242424;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; color: #f0ede6; margin: 0 auto 1.25rem;
+}
+.sent-title { text-align: center; font-size: 28px; margin-bottom: 1.25rem; }
+.personal-card {
+  background: #111; border: 1px solid #1c1c1c; border-radius: 14px;
+  padding: 1.75rem 1.5rem; flex: 1; overflow-y: auto; scrollbar-width: none;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+}
+.personal-card::-webkit-scrollbar { display: none; }
+.card-poem { font-size: 17px; line-height: 2.2; color: #888; font-style: italic; }
+.waiting-msg {
+  text-align: center; font-size: 11px; color: #333; margin-top: 1.5rem;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  animation: breathe 2.5s ease-in-out infinite; flex-shrink: 0;
+}
+@keyframes breathe { 0%,100%{opacity:0.3} 50%{opacity:0.8} }
+
+/* ── CONNECTION STATUS ────────────────────────────── */
+.conn-dot {
+  position: fixed; top: 14px; right: 16px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #1e1e1e; z-index: 9000;
+  transition: background 0.6s ease;
+}
+.conn-dot.ok   { background: #1e4a1e; }
+.conn-dot.lost { background: #5a1a1a; animation: blink 0.9s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+/* ── RECONNECT OVERLAY ────────────────────────────── */
+#reconnectOverlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(14,14,14,0.92);
+  align-items: center; justify-content: center;
+  z-index: 8999;
+}
+#reconnectOverlay .reconnect-msg {
+  font-size: 11px; color: #3a3a3a; letter-spacing: 0.22em;
+  text-transform: uppercase; animation: breathe 2s ease-in-out infinite;
+}
+</style>
+</head>
+<body>
+
+<!-- connection dot -->
+<div class="conn-dot" id="connDot"></div>
+
+<!-- reconnect overlay — shown when socket drops -->
+<div id="reconnectOverlay">
+  <div class="reconnect-msg">Reconnecting…</div>
+</div>
+
+<!-- NAME -->
+<div class="screen active" id="s-name">
+  <div class="eyelet">Welcome</div>
+  <h1 class="title garamond">Enter your name.</h1>
+  <p class="sub">Optional — appears on the results podium.</p>
+  <input class="name-input" id="nameInput" type="text" maxlength="30" placeholder="Your name…" autocomplete="off" autocorrect="off" spellcheck="false">
+  <p class="name-hint">Leave blank to remain anonymous.</p>
+  <button class="btn" onclick="confirmName()">Enter →</button>
+</div>
+
+<!-- WAITING -->
+<div class="screen" id="s-waiting">
+  <div class="pulse-ring">◦</div>
+  <div class="eyelet">Connection Established</div>
+  <h1 class="title garamond">Please wait.</h1>
+  <p class="sub">The host will begin the reading shortly.</p>
+  <div class="player-name-tag" id="playerNameTag">Playing as: <em id="playerNameDisplay"></em></div>
+
+  <!-- Theme announcement (shown when theme is selected) -->
+  <div class="waiting-theme-reveal" id="waitingThemeReveal">
+    <div class="theme-sub-lbl">Your Mission</div>
+    <div class="theme-directive" id="waitingThemeDirective"></div>
+  </div>
+</div>
+
+<!-- READ -->
+<div class="screen" id="s-read">
+  <div class="eyelet">Phase 1</div>
+  <h2 class="title garamond">Read the text.</h2>
+  <div class="theme-mission" id="readMission">
+    Transform into: <strong id="readMissionTheme"></strong>
+  </div>
+  <div class="poem-block">
+    <div class="poem-text" id="readBlock"></div>
+  </div>
+  <button class="btn" onclick="goErase()">Proceed to Erase →</button>
+</div>
+
+<!-- ERASE -->
+<div class="screen" id="s-erase">
+  <div class="progress-bar">
+    <span>Kept: <strong id="progKeptNum">0</strong></span>
+    <span>Erased: <strong id="progErasedNum">0</strong></span>
+  </div>
+  <h2 class="title garamond erase-header">Tap words to erase.</h2>
+  <p class="erase-sub">Tap again to restore. Find the poem within.</p>
+  <div class="theme-mission" id="eraseMission">
+    Transform into: <strong id="eraseMissionTheme"></strong>
+  </div>
+  <div class="word-area" id="wordArea"></div>
+  <div class="erase-actions">
+    <p class="validation-msg" id="validationMsg"></p>
+    <button class="btn" onclick="submitErasure()">Send My Poem →</button>
+    <button class="btn-ghost" onclick="resetPoem()">↺ Reset</button>
+  </div>
+</div>
+
+<!-- SENT -->
+<div class="screen" id="s-sent">
+  <div class="success-ring">✦</div>
+  <h2 class="title garamond sent-title">Your Poem</h2>
+  <div class="personal-card">
+    <div class="card-poem" id="cardPoem"></div>
+  </div>
+  <div class="waiting-msg" id="waitingMsg">Waiting for the collective reveal…</div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────
+let WORDS         = [];
+let LINE_BREAKS   = new Set();
+let hasSubmitted  = false;
+let currentTheme  = null;
+let myErasedSet   = new Set();
+let wordAreaReady = false;
+let playerName    = '';
+let nameConfirmed = false;
+let lastPhase     = null;
+
+// ── Helpers ───────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id)?.classList.add('active');
+}
+
+function setPlayerNameDisplay(name) {
+  const tag = document.getElementById('playerNameTag');
+  const el  = document.getElementById('playerNameDisplay');
+  if (name) {
+    el.textContent = name;
+    tag.style.display = 'block';
+  } else {
+    tag.style.display = 'none';
+  }
+}
+
+// ── Name screen ───────────────────────────────────────
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem('lr_name');
+  if (saved !== null) {
+    // Pre-fill the input so user can see (and change) their saved name
+    document.getElementById('nameInput').value = saved;
+    playerName    = saved;
+    nameConfirmed = true;
+    setPlayerNameDisplay(playerName);
+    showScreen('s-waiting');
+    if (lastPhase) handlePhase(lastPhase);
+  }
+});
+
+document.getElementById('nameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') confirmName();
+});
+
+function confirmName() {
+  const input = document.getElementById('nameInput');
+  playerName = input.value.trim().slice(0, 30);
+  localStorage.setItem('lr_name', playerName);
+  nameConfirmed = true;
+  setPlayerNameDisplay(playerName);
+  showScreen('s-waiting');
+  if (lastPhase) handlePhase(lastPhase);
+}
+
+// ── Socket ────────────────────────────────────────────
+const socket = io();
+
+// Connection status dot + overlay
+socket.on('connect', () => {
+  document.getElementById('connDot').className = 'conn-dot ok';
+  document.getElementById('reconnectOverlay').style.display = 'none';
+  // Server sends phase_update on every connect — that handler restores state
+});
+
+socket.on('disconnect', () => {
+  document.getElementById('connDot').className = 'conn-dot lost';
+  document.getElementById('reconnectOverlay').style.display = 'flex';
+});
+
+// ── Main state handler ────────────────────────────────
+socket.on('phase_update', data => {
+  const prevWordStr = WORDS.join('\x00');
+
+  WORDS        = data.words       || [];
+  LINE_BREAKS  = new Set(data.line_breaks || []);
+  currentTheme = data.theme || null;
+
+  // Server-authoritative: if the server tells us whether we've submitted,
+  // trust it over local state (handles reconnects and lost submissions).
+  if (data.has_submitted !== undefined) {
+    const serverSaysSubmitted = data.has_submitted;
+    if (!serverSaysSubmitted && hasSubmitted) {
+      // Our optimistic flag was wrong (e.g. submission was lost in transit)
+      hasSubmitted  = false;
+      wordAreaReady = false;
+    } else if (serverSaysSubmitted && !hasSubmitted) {
+      // We reconnected and the server knows we already submitted
+      hasSubmitted = true;
+      restorePoemFromStorage();
+    }
+  }
+
+  // Detect new round: word list changed (server cleared WORDS on new_round)
+  if (WORDS.join('\x00') !== prevWordStr && prevWordStr !== '') {
+    hasSubmitted  = false;
+    myErasedSet   = new Set();
+    wordAreaReady = false;
+    document.getElementById('wordArea').innerHTML = '';
+    localStorage.removeItem('lr_erased');
+  }
+
+  updateThemeBanners();
+  lastPhase = data.phase;
+  if (nameConfirmed) handlePhase(data.phase);
+});
+
+// Server confirmed our submission was received and stored
+socket.on('submit_ok', data => {
+  // Already on s-sent from submitErasure(); just ensure the state is locked in
+  hasSubmitted = true;
+});
+
+// Server rejected our submission (closed phase, empty erasure, etc.)
+socket.on('submit_error', data => {
+  hasSubmitted  = false;
+  wordAreaReady = true;   // word area was already populated — keep it
+  showValidationMsg(data.reason || 'Could not submit. Please try again.');
+  showScreen('s-erase');
+});
+
+// ── Phase routing ─────────────────────────────────────
+function handlePhase(phase) {
+  switch (phase) {
+    case 'setup':
+    case 'waiting':
+    case 'theme':
+      showScreen('s-waiting');
+      break;
+
+    case 'reading':
+      if (!hasSubmitted) {
+        populateReadBlock();
+        showScreen('s-read');
+      }
+      break;
+
+    case 'erasing':
+      if (!hasSubmitted) {
+        if (!wordAreaReady) {
+          populateWordArea();
+          wordAreaReady = true;
+        }
+        showScreen('s-erase');
+      }
+      break;
+
+    case 'cycle':
+    case 'reveal':
+      if (!hasSubmitted) {
+        showScreen('s-waiting');
+      } else {
+        // Always navigate submitted users to s-sent (handles reconnect case
+        // where they may have landed back on s-waiting).
+        document.getElementById('waitingMsg').style.display = 'none';
+        showScreen('s-sent');
+      }
+      break;
+  }
+}
+
+// ── Theme banners ─────────────────────────────────────
+function updateThemeBanners() {
+  const wtr = document.getElementById('waitingThemeReveal');
+  const wtd = document.getElementById('waitingThemeDirective');
+  if (currentTheme) {
+    wtd.textContent    = currentTheme;
+    wtr.style.display  = 'flex';
+  } else {
+    wtr.style.display  = 'none';
+  }
+
+  const rm  = document.getElementById('readMission');
+  const rmt = document.getElementById('readMissionTheme');
+  if (currentTheme) { rmt.textContent = currentTheme; rm.style.display = 'block'; }
+  else rm.style.display = 'none';
+
+  const em  = document.getElementById('eraseMission');
+  const emt = document.getElementById('eraseMissionTheme');
+  if (currentTheme) { emt.textContent = currentTheme; em.style.display = 'block'; }
+  else em.style.display = 'none';
+}
+
+// ── Read screen ───────────────────────────────────────
+function populateReadBlock() {
+  const block = document.getElementById('readBlock');
+  block.innerHTML = '';
+  WORDS.forEach((w, i) => {
+    if (LINE_BREAKS.has(i)) block.appendChild(document.createElement('br'));
+    block.appendChild(document.createTextNode(w + ' '));
+  });
+}
+
+function goErase() {
+  populateWordArea();
+  wordAreaReady = true;
+  showScreen('s-erase');
+}
+
+// ── Erase screen ──────────────────────────────────────
+function populateWordArea() {
+  const area = document.getElementById('wordArea');
+  area.innerHTML = '';
+  myErasedSet = new Set();
+
+  WORDS.forEach((w, i) => {
+    if (LINE_BREAKS.has(i)) area.appendChild(document.createElement('br'));
+
+    const span = document.createElement('span');
+    span.className = 'w';
+    span.textContent = w;
+    span.dataset.idx = i;
+    span.addEventListener('click', () => toggleWord(span, i));
+    area.appendChild(span);
+    area.appendChild(document.createTextNode(' '));
+  });
+
+  updateProgress();
+}
+
+function toggleWord(span, idx) {
+  if (span.classList.contains('gone')) {
+    span.classList.remove('gone');
+    myErasedSet.delete(idx);
+  } else {
+    span.classList.add('gone');
+    myErasedSet.add(idx);
+  }
+  updateProgress();
+}
+
+function updateProgress() {
+  const erased = myErasedSet.size;
+  const kept   = WORDS.length - erased;
+  document.getElementById('progKeptNum').textContent   = kept;
+  document.getElementById('progErasedNum').textContent = erased;
+}
+
+function resetPoem() {
+  document.querySelectorAll('.w.gone').forEach(w => w.classList.remove('gone'));
+  myErasedSet = new Set();
+  updateProgress();
+}
+
+let _validationTimer = null;
+
+function showValidationMsg(msg) {
+  const el = document.getElementById('validationMsg');
+  el.textContent = msg;
+  clearTimeout(_validationTimer);
+  _validationTimer = setTimeout(() => { el.textContent = ''; }, 3500);
+}
+
+function submitErasure() {
+  if (myErasedSet.size === 0) {
+    showValidationMsg('Tap at least one word to erase first.');
+    return;
+  }
+  const erasedArr = Array.from(myErasedSet);
+  socket.emit('submit_erasure', {
+    erased: erasedArr,
+    name:   playerName || 'Anonymous',
+  });
+  // Optimistic: show sent screen immediately. submit_error will revert if needed.
+  hasSubmitted = true;
+  // Persist erased set so we can rebuild the poem after a reconnect
+  try { localStorage.setItem('lr_erased', JSON.stringify(erasedArr)); } catch(e) {}
+  buildPersonalPoem(myErasedSet);
+  document.getElementById('waitingMsg').style.display = '';
+  showScreen('s-sent');
+}
+
+// ── Sent screen ───────────────────────────────────────
+function buildPersonalPoem(erasedSet) {
+  const card = document.getElementById('cardPoem');
+  card.innerHTML = '';
+  WORDS.forEach((w, i) => {
+    if (erasedSet.has(i)) return;
+    if (LINE_BREAKS.has(i) && card.childNodes.length > 0) {
+      card.appendChild(document.createElement('br'));
+    }
+    card.appendChild(document.createTextNode(w + ' '));
+  });
+}
+
+function restorePoemFromStorage() {
+  // Called when server tells us we already submitted (reconnect path).
+  // Rebuild the poem from whatever is stored in localStorage.
+  if (WORDS.length === 0) return;
+  try {
+    const raw = localStorage.getItem('lr_erased');
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    myErasedSet = new Set(arr.map(Number));
+    buildPersonalPoem(myErasedSet);
+  } catch(e) { /* ignore — poem just stays blank */ }
+}
+</script>
+</body>
+</html>

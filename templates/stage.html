@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Living Reading — Stage</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,700;1,400;1,500&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Georgia', serif;
+  background: #0e0e0e;
+  color: #f0ede6;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+h1,h2,h3,.garamond { font-family: 'EB Garamond', serif; }
+
+/* ── CONTROLS BAR ─────────────────────────────────── */
+.controls {
+  flex-shrink: 0; order: 2;
+  background: #111; border-top: 1px solid #1e1e1e;
+  padding: 0.65rem 1.5rem;
+  display: flex; align-items: center; gap: 0.55rem; z-index: 100;
+}
+.ctrl-btn {
+  background: transparent; color: #f0ede6;
+  border: 1px solid #2a2a2a; padding: 6px 14px;
+  font-family: inherit; font-size: 12px; border-radius: 100px;
+  cursor: pointer; transition: all 0.2s; letter-spacing: 0.04em; white-space: nowrap;
+}
+.ctrl-btn:hover:not(:disabled) { border-color: #555; }
+.ctrl-btn:disabled { opacity: 0.28; cursor: default; }
+.ctrl-btn.active-phase { background: #f0ede6; color: #0e0e0e; border-color: #f0ede6; }
+.ctrl-right { margin-left: auto; display: flex; align-items: center; gap: 0.7rem; }
+.status-badge { font-size: 12px; color: #444; letter-spacing: 0.05em; }
+.status-badge span { color: #f0ede6; }
+
+/* host connection dot */
+.host-conn-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: #1c3a1c; transition: background 0.5s;
+}
+.host-conn-dot.ok   { background: #2a6a2a; }
+.host-conn-dot.lost { background: #6a1a1a; animation: hostBlink 0.8s ease-in-out infinite; }
+@keyframes hostBlink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+/* full-screen reconnect warning for host */
+#hostReconnectBanner {
+  display: none; position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+  background: #1a0000; border: 1px solid #500; border-radius: 8px;
+  padding: 10px 22px; font-size: 11px; color: #c44; letter-spacing: 0.14em;
+  text-transform: uppercase; z-index: 9999; white-space: nowrap;
+  animation: breatheSlow 1.4s ease-in-out infinite;
+}
+
+/* ── SHARED VIEW SHELL ────────────────────────────── */
+.view-container { flex: 1; position: relative; overflow: hidden; order: 1; }
+.view {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  padding: 2.5rem 3.5rem;
+  display: flex; flex-direction: column;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.65s ease;
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
+}
+.view::-webkit-scrollbar { display: none; }
+.view.active { opacity: 1; pointer-events: auto; }
+.label-sm {
+  font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase;
+  color: #3a3a3a; margin-bottom: 0.4rem; flex-shrink: 0;
+}
+
+/* ── SETUP ────────────────────────────────────────── */
+#v-setup { align-items: center; justify-content: center; gap: 1.5rem; text-align: center; }
+.stage-title { font-size: 52px; font-weight: 400; line-height: 1.1; }
+textarea {
+  width: min(620px, 100%); height: 280px;
+  background: #141414; color: #aaa; border: 1px solid #222; border-radius: 10px;
+  padding: 1rem 1.25rem; font-family: 'Georgia', serif; font-size: 15px;
+  line-height: 1.8; resize: none; outline: none; transition: border-color 0.2s;
+}
+textarea:focus { border-color: #3a3a3a; color: #ccc; }
+.primary-btn {
+  background: #f0ede6; color: #0e0e0e; border: none;
+  padding: 12px 28px; border-radius: 100px;
+  font-family: inherit; font-size: 15px; cursor: pointer;
+  transition: opacity 0.2s; letter-spacing: 0.03em;
+}
+.primary-btn:hover { opacity: 0.85; }
+
+/* ── WAITING ──────────────────────────────────────── */
+#v-waiting { align-items: center; justify-content: center; text-align: center; gap: 1.25rem; }
+#qrcode-container { background: white; padding: 14px; border-radius: 10px; margin: 0.5rem auto; display: inline-block; }
+.url-text { font-size: 18px; color: #777; letter-spacing: 0.04em; font-family: 'EB Garamond', serif; }
+.waiting-sub { font-size: 13px; color: #3a3a3a; letter-spacing: 0.1em; text-transform: uppercase; animation: breatheSlow 3s ease-in-out infinite; }
+.waiting-theme-badge {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 20px; color: #8a7030;
+  border: 1px solid #3a2e10; border-radius: 100px; padding: 6px 20px;
+  display: none;
+}
+@keyframes breatheSlow { 0%,100%{opacity:0.35} 50%{opacity:0.9} }
+
+/* ── READING ──────────────────────────────────────── */
+#v-reading { gap: 1.75rem; max-width: 860px; margin: 0 auto; }
+.read-title { font-size: 40px; font-weight: 400; flex-shrink: 0; }
+.poem-display { border-left: 1px solid #1e1e1e; padding-left: 2rem; color: #666; font-size: 24px; line-height: 2; font-style: italic; }
+.reading-theme-lbl { font-size: 12px; color: #6a5820; letter-spacing: 0.1em; text-transform: uppercase; flex-shrink: 0; display: none; }
+
+/* ── ERASING ──────────────────────────────────────── */
+#v-erasing { align-items: center; justify-content: center; text-align: center; gap: 1.25rem; }
+.erasing-big { font-size: 76px; font-weight: 400; animation: breathe 3s ease-in-out infinite; flex-shrink: 0; }
+@keyframes breathe { 0%,100%{opacity:0.5} 50%{opacity:1} }
+.erasing-theme {
+  font-size: 20px; color: #a07828; font-style: italic;
+  letter-spacing: 0.04em; flex-shrink: 0; display: none;
+}
+.tension-counter { font-size: 22px; color: #444; letter-spacing: 0.06em; transition: all 0.4s ease; flex-shrink: 0; }
+.tension-counter.all-in { color: #f0ede6; font-size: 26px; letter-spacing: 0.1em; }
+
+/* ══════════════════════════════════════════════════
+   THEME SELECTION
+══════════════════════════════════════════════════ */
+#v-theme { gap: 1.75rem; padding: 2.75rem 3.5rem; }
+.theme-heading { font-size: 42px; font-weight: 400; line-height: 1.1; flex-shrink: 0; }
+.theme-sub { font-size: 13px; color: #444; letter-spacing: 0.06em; flex-shrink: 0; }
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.65rem;
+  flex: 1;
+  align-content: start;
+}
+.theme-btn {
+  background: #111; border: 1px solid #222; color: #777;
+  padding: 1rem 0.75rem;
+  font-family: 'EB Garamond', serif; font-size: 20px; font-style: italic;
+  border-radius: 12px; cursor: pointer; text-align: center;
+  transition: all 0.22s ease; letter-spacing: 0.02em;
+  position: relative; overflow: hidden;
+}
+.theme-btn::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(201,168,76,0.08) 0%, transparent 70%);
+  opacity: 0; transition: opacity 0.3s;
+}
+.theme-btn:hover { border-color: #c9a84c; color: #e0c87a; background: #130f05; }
+.theme-btn:hover::after { opacity: 1; }
+.theme-btn.selected {
+  border-color: #c9a84c; background: #1a1505; color: #e4c870;
+  box-shadow: 0 0 24px rgba(201,168,76,0.12);
+}
+
+/* ══════════════════════════════════════════════════
+   CYCLE — WORD CLOUD & ANALYTICS
+══════════════════════════════════════════════════ */
+#v-cycle { gap: 1.25rem; padding: 2rem 3rem; }
+.cycle-heading { font-size: 30px; font-weight: 400; flex-shrink: 0; }
+.cycle-theme-lbl { font-size: 12px; color: #6a5820; letter-spacing: 0.1em; text-transform: uppercase; display: none; flex-shrink: 0; }
+
+/* Stat cards */
+.dash-row {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.65rem; flex-shrink: 0;
+}
+.dash-card {
+  background: #111; border: 1px solid #1c1c1c; border-radius: 12px;
+  padding: 0.9rem 1rem; text-align: center;
+}
+.dash-card.accent { border-color: #3a2c12; background: #130f05; }
+.dash-num {
+  font-family: 'EB Garamond', serif; font-size: 34px; color: #f0ede6;
+  line-height: 1; margin-bottom: 0.25rem;
+}
+.dash-word { font-size: 20px; font-style: italic; color: #c9a84c; }
+.dash-lbl { font-size: 9px; color: #3a3a3a; text-transform: uppercase; letter-spacing: 0.14em; }
+
+/* Word cloud */
+.wc-container {
+  flex: 1; display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  gap: 0.6rem; padding: 0.5rem 0; overflow: hidden;
+}
+.wc-tier {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+  gap: 1rem; width: 100%;
+}
+.wc-word {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  white-space: nowrap; cursor: default; position: relative;
+  opacity: 0; transform: translateY(10px);
+  animation: wfloat 0.5s cubic-bezier(0.25,0.46,0.45,0.94) forwards;
+}
+@keyframes wfloat { to { opacity: 1; transform: translateY(0); } }
+
+.wc-count {
+  font-size: 0.42em; font-style: normal; vertical-align: super;
+  margin-left: 2px; opacity: 0.65;
+}
+/* Tier styles */
+.wc-tier-0 .wc-word { font-size: 58px; color: #e4c870; }
+.wc-tier-0 .wc-count { color: #b89030; }
+.wc-tier-1 .wc-word { font-size: 34px; color: #b09040; }
+.wc-tier-1 .wc-count { color: #907030; }
+.wc-tier-2 .wc-word { font-size: 21px; color: #666; }
+.wc-tier-2 .wc-count { color: #444; }
+.wc-tier-3 .wc-word { font-size: 13px; color: #3a3a3a; filter: blur(0.4px); }
+
+.wc-empty { font-size: 16px; color: #333; font-style: italic; text-align: center; margin: 2rem 0; }
+
+/* ══════════════════════════════════════════════════
+   REVEAL — 3-PHASE WINNER SHOWCASE
+══════════════════════════════════════════════════ */
+#v-reveal { align-items: flex-start; gap: 1rem; padding: 2.5rem 3.5rem; }
+
+.reveal-phase-row {
+  display: flex; align-items: center; gap: 1.25rem; flex-shrink: 0;
+}
+.reveal-phase-lbl {
+  font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #3a3a3a;
+  transition: opacity 0.4s ease;
+}
+.reveal-phase-pip {
+  display: flex; gap: 6px; align-items: center;
+}
+.reveal-pip {
+  width: 6px; height: 6px; border-radius: 50%; background: #222;
+  transition: background 0.5s ease, transform 0.4s ease;
+}
+.reveal-pip.active   { background: #c9a84c; transform: scale(1.3); }
+.reveal-pip.complete { background: #555; }
+
+.reveal-theme-badge {
+  font-size: 11px; color: #7a5f20; letter-spacing: 0.12em; text-transform: uppercase;
+  border: 1px solid #3a2c12; border-radius: 100px; padding: 4px 14px;
+  opacity: 0; transition: opacity 0.8s ease; display: none;
+}
+
+#revealArea { width: 100%; max-width: 1000px; margin: 0 auto; flex: 1; min-height: 4rem; transition: opacity 0.65s ease; }
+.poem-line-reveal { display: block; min-height: 1em; line-height: 2.3; }
+.reveal-word {
+  display: inline-block;
+  font-size: 22px; font-style: italic; color: #f0ede6;
+  opacity: 1; line-height: inherit;
+  transition: opacity 0.55s ease, color 0.5s ease;
+}
+.reveal-word.marking {
+  color: #b08828; opacity: 0.65;
+  text-decoration: line-through;
+  text-decoration-color: rgba(176,136,40,0.5);
+  text-decoration-thickness: 1px;
+}
+.reveal-word.erased { opacity: 0; }
+
+/* Score card */
+.score-card {
+  background: #111; border: 1px solid #1e1e1e; border-radius: 14px;
+  padding: 1.1rem 1.5rem 1.25rem;
+  display: flex; flex-direction: column; gap: 0.75rem;
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+  flex-shrink: 0;
+}
+.score-card.visible { opacity: 1; transform: translateY(0); }
+
+.score-headline {
+  display: flex; align-items: baseline; gap: 0.5rem;
+}
+.score-total-num {
+  font-family: 'EB Garamond', serif; font-size: 44px; color: #c9a84c; line-height: 1;
+}
+.score-total-lbl { font-size: 11px; color: #444; letter-spacing: 0.12em; text-transform: uppercase; }
+
+.score-grid {
+  display: grid; grid-template-columns: 90px 1fr 28px;
+  gap: 0.35rem 0.75rem; align-items: center;
+}
+.sc-lbl { font-size: 10px; color: #3a3a3a; text-transform: uppercase; letter-spacing: 0.1em; text-align: right; }
+.sc-bar-wrap { height: 2px; background: #1c1c1c; border-radius: 1px; overflow: hidden; }
+.sc-bar { height: 100%; width: 0%; background: #c9a84c; border-radius: 1px; transition: width 0.9s cubic-bezier(0.16,1,0.3,1); }
+.sc-val { font-size: 11px; color: #555; font-variant-numeric: tabular-nums; }
+
+/* No submissions fallback */
+.reveal-empty { font-size: 16px; color: #333; font-style: italic; padding: 2rem 0; }
+
+/* Loading state shown while background analytics computation runs */
+.reveal-loading {
+  font-size: 11px; color: #2a2a2a; letter-spacing: 0.2em; text-transform: uppercase;
+  text-align: center; padding: 4rem 0;
+  animation: breatheSlow 1.8s ease-in-out infinite;
+}
+
+.reveal-actions { display: flex; gap: 0.75rem; flex-shrink: 0; }
+
+/* ── PODIUM ───────────────────────────────────────── */
+#podiumSection {
+  display: none; flex-direction: column;
+  align-items: center; gap: 1.5rem;
+  flex: 1; opacity: 0; transition: opacity 0.7s ease;
+}
+#podiumSection.visible { opacity: 1; }
+.podium-eyelet { font-size: 10px; color: #3a3a3a; letter-spacing: 0.25em; text-transform: uppercase; }
+.podium-row { display: flex; align-items: flex-end; justify-content: center; gap: 2rem; width: 100%; max-width: 600px; }
+.podium-entry {
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  opacity: 0; transform: translateY(24px);
+  transition: opacity 0.65s ease, transform 0.65s ease;
+  min-width: 120px;
+}
+.podium-entry.visible { opacity: 1; transform: translateY(0); }
+.podium-medal { font-size: 28px; line-height: 1; }
+.podium-name { font-family: 'EB Garamond', serif; font-style: italic; font-size: 18px; color: #f0ede6; text-align: center; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium-score-num { font-family: 'EB Garamond', serif; font-size: 38px; color: #c9a84c; line-height: 1; }
+.podium-score-lbl { font-size: 9px; color: #3a3a3a; text-transform: uppercase; letter-spacing: 0.12em; }
+.podium-plinth { width: 100%; border-radius: 4px 4px 0 0; margin-top: 0.5rem; }
+.rank-1 .podium-plinth { height: 80px; background: #1a1505; border: 1px solid rgba(201,168,76,0.3); }
+.rank-2 .podium-plinth { height: 55px; background: #141414; border: 1px solid #252525; }
+.rank-3 .podium-plinth { height: 36px; background: #111; border: 1px solid #1e1e1e; }
+
+/* ── SCORE WINNER NAME ────────────────────────────── */
+.score-winner-name { font-family: 'EB Garamond', serif; font-style: italic; font-size: 20px; color: #f0ede6; margin-bottom: 0.15rem; }
+.score-num-row { display: flex; align-items: baseline; gap: 0.5rem; }
+</style>
+</head>
+<body>
+
+<div class="view-container">
+
+  <!-- SETUP -->
+  <div class="view active" id="v-setup">
+    <div class="label-sm">Administration</div>
+    <h1 class="stage-title garamond">Set the text.</h1>
+    <textarea id="textInput" placeholder="Paste your text here…"></textarea>
+    <button class="primary-btn" onclick="startSession()">Begin Session →</button>
+  </div>
+
+  <!-- WAITING -->
+  <div class="view" id="v-waiting">
+    <div class="label-sm">Literature off the page</div>
+    <h1 class="stage-title garamond" style="margin-bottom:0.5rem;">Open your phone.<br>Scan this code.</h1>
+    <div id="qrcode-container"></div>
+    <div class="url-text" id="url-display"></div>
+    <div class="waiting-theme-badge" id="waitingThemeBadge"></div>
+    <div class="waiting-sub">Waiting for readers…</div>
+  </div>
+
+  <!-- THEME SELECTION -->
+  <div class="view" id="v-theme">
+    <div class="label-sm">Collective Theme</div>
+    <h2 class="theme-heading garamond">Choose the narrative theme.</h2>
+    <p class="theme-sub">The audience votes. You decide. This frame will guide the collective erasure.</p>
+    <div class="theme-grid" id="themeGrid"></div>
+  </div>
+
+  <!-- READING -->
+  <div class="view" id="v-reading">
+    <div class="label-sm">Phase 1 — Reading</div>
+    <h2 class="garamond read-title" style="font-size:40px;font-weight:400;flex-shrink:0;">Read slowly.</h2>
+    <div class="reading-theme-lbl" id="readingThemeLbl"></div>
+    <div class="poem-display" id="stageReadText"></div>
+  </div>
+
+  <!-- ERASING -->
+  <div class="view" id="v-erasing">
+    <div class="erasing-big garamond">Erasing.</div>
+    <div class="erasing-theme" id="erasingThemeLbl"></div>
+    <div class="tension-counter" id="tensionCounter">0 of 0 submitted</div>
+  </div>
+
+  <!-- CYCLE — WORD CLOUD & ANALYTICS -->
+  <div class="view" id="v-cycle">
+    <div class="label-sm">Erasure Analytics</div>
+    <h2 class="cycle-heading garamond">What the collective chose to erase</h2>
+    <div class="cycle-theme-lbl" id="cycleThemeLbl"></div>
+
+    <div class="dash-row">
+      <div class="dash-card">
+        <div class="dash-num" id="dashTotal">0</div>
+        <div class="dash-lbl">Total Erasures</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-num" id="dashUnique">0</div>
+        <div class="dash-lbl">Unique Words Erased</div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-num" id="dashReaders">0</div>
+        <div class="dash-lbl">Readers Participated</div>
+      </div>
+      <div class="dash-card accent">
+        <div class="dash-num dash-word" id="dashTopWord">—</div>
+        <div class="dash-lbl">Most Erased</div>
+      </div>
+    </div>
+
+    <div class="wc-container" id="wordCloud"></div>
+  </div>
+
+  <!-- REVEAL — PODIUM + 3-PHASE WINNER SHOWCASE -->
+  <div class="view" id="v-reveal">
+    <div class="reveal-phase-row">
+      <span class="reveal-phase-lbl" id="revealPhaseLbl">Rankings</span>
+      <div class="reveal-phase-pip">
+        <div class="reveal-pip active" id="pip0"></div>
+        <div class="reveal-pip"        id="pip1"></div>
+        <div class="reveal-pip"        id="pip2"></div>
+        <div class="reveal-pip"        id="pip3"></div>
+      </div>
+      <div class="reveal-theme-badge" id="revealThemeBadge"></div>
+    </div>
+
+    <div id="podiumSection">
+      <div class="podium-eyelet">Results</div>
+      <div class="podium-row" id="podiumRow"></div>
+    </div>
+
+    <div id="revealArea"></div>
+
+    <div class="score-card" id="scoreCard">
+      <div class="score-headline">
+        <div>
+          <div class="score-winner-name" id="scoreWinnerName"></div>
+          <div class="score-num-row">
+            <span class="score-total-num" id="scoreTotalNum">—</span>
+            <span class="score-total-lbl">points</span>
+          </div>
+        </div>
+      </div>
+      <div class="score-grid" id="scoreBreakdown"></div>
+    </div>
+
+    <div class="reveal-actions">
+      <button class="ctrl-btn" onclick="downloadPoem()">↓ Download Poem</button>
+    </div>
+  </div>
+
+</div><!-- /view-container -->
+
+<!-- CONTROLS -->
+<div class="controls">
+  <button class="ctrl-btn active-phase" id="btn-setup"   onclick="setPhase('setup')">Setup</button>
+  <button class="ctrl-btn" id="btn-waiting"  onclick="setPhase('waiting')"  disabled>Waiting</button>
+  <button class="ctrl-btn" id="btn-theme"    onclick="setPhase('theme')"    disabled>→ Theme</button>
+  <button class="ctrl-btn" id="btn-reading"  onclick="setPhase('reading')"  disabled>→ Read</button>
+  <button class="ctrl-btn" id="btn-erasing"  onclick="setPhase('erasing')"  disabled>→ Erase</button>
+  <button class="ctrl-btn" id="btn-cycle"    onclick="setPhase('cycle')"    disabled>→ Analytics</button>
+  <button class="ctrl-btn" id="btn-reveal"   onclick="confirmReveal()"      disabled>→ Reveal</button>
+
+  <div class="ctrl-right">
+    <button class="ctrl-btn" onclick="newRound()" style="border-color:#333;">New Round</button>
+    <button class="ctrl-btn" onclick="toggleFullscreen()" style="border-color:#333;">⛶</button>
+    <div class="status-badge"><span id="connNum">0</span> connected</div>
+    <div class="host-conn-dot" id="hostConnDot"></div>
+  </div>
+</div>
+
+<div id="hostReconnectBanner">Host disconnected — reconnecting…</div>
+
+<script>
+// ── Configurable theme list (edit here to change available themes) ─────────────
+const THEMES = [
+  'Romance','Heartbreak','Comedy','Drama','Tragedy',
+  'Hope','Nostalgia','Mystery','Friendship','Loneliness',
+  'Joy','Anger','Surrealism','Absurdism','Wonder','Loss',
+];
+
+// ── App state ─────────────────────────────────────────────────────────────────
+let WORDS          = [];
+let LINE_BREAKS    = new Set();
+let ALL_SUBMISSIONS = [];
+let totalConnected  = 0;
+let currentTheme    = null;
+
+// Reveal state
+let _revealTimers      = [];
+let _revealWinner      = null;
+let _revealPodium      = null;
+let _analyticsReceived = false;   // true once analytics_update has arrived for this round
+let _currentRoundId    = 0;       // tracks server round_id; resets stale analytics
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  const origin = window.location.origin;
+  document.getElementById('url-display').textContent = origin;
+  new QRCode(document.getElementById('qrcode-container'), {
+    text: origin, width: 192, height: 192,
+    colorDark: '#000', colorLight: '#fff',
+    correctLevel: QRCode.CorrectLevel.H,
+  });
+  populateThemeGrid();
+});
+
+// ── Socket ────────────────────────────────────────────────────────────────────
+const socket = io({ query: { role: 'stage' } });
+
+socket.on('connect', () => {
+  document.getElementById('hostConnDot').className = 'host-conn-dot ok';
+  document.getElementById('hostReconnectBanner').style.display = 'none';
+  // Server sends phase_update on every connect — full state is restored automatically
+});
+
+socket.on('disconnect', () => {
+  document.getElementById('hostConnDot').className = 'host-conn-dot lost';
+  document.getElementById('hostReconnectBanner').style.display = 'block';
+});
+
+socket.on('connection_update', data => {
+  totalConnected = data.total_connected;
+  document.getElementById('connNum').textContent = totalConnected;
+  updateTensionCounter(ALL_SUBMISSIONS.length);
+});
+
+socket.on('count_update', data => {
+  if (data.submissions) ALL_SUBMISSIONS = data.submissions;
+  totalConnected = data.total_connected;
+  document.getElementById('connNum').textContent = totalConnected;
+  updateTensionCounter(data.count);
+});
+
+socket.on('phase_update', data => {
+  WORDS           = data.words        || [];
+  LINE_BREAKS     = new Set(data.line_breaks || []);
+  ALL_SUBMISSIONS = data.submissions  || [];
+  totalConnected  = data.total_connected;
+  currentTheme    = data.theme        || null;
+
+  // New round detected via server round_id — reset all analytics state
+  if (data.round_id !== undefined && data.round_id !== _currentRoundId) {
+    _currentRoundId    = data.round_id;
+    _revealWinner      = null;
+    _revealPodium      = null;
+    _analyticsReceived = false;
+    clearRevealTimers();
+  }
+
+  // Reconnect path: server injects analytics directly into the phase_update
+  if (data.winner !== undefined) { _revealWinner = data.winner; }
+  if (data.podium !== undefined) { _revealPodium = data.podium; }
+
+  document.getElementById('connNum').textContent = totalConnected;
+  updateTensionCounter(data.count);
+  syncPhaseButtons(data.phase);
+  updateThemeLabels();
+
+  if (data.phase !== 'reveal') clearRevealTimers();
+
+  switch (data.phase) {
+    case 'setup':
+      document.getElementById('textInput').value = '';
+      showView('v-setup');
+      break;
+    case 'waiting':
+      showView('v-waiting');
+      break;
+    case 'theme':
+      highlightCurrentTheme();
+      showView('v-theme');
+      break;
+    case 'reading':
+      populateReadView();
+      showView('v-reading');
+      break;
+    case 'erasing':
+      showView('v-erasing');
+      break;
+    case 'cycle':
+      clearRevealTimers();
+      showView('v-cycle');
+      renderErasureAnalytics();
+      break;
+    case 'reveal':
+      clearRevealTimers();
+      showView('v-reveal');
+      document.getElementById('scoreCard').classList.remove('visible');
+      if (data.podium !== undefined) {
+        // Reconnect path: analytics were bundled into the phase_update
+        renderWinnerReveal(data.stats, _revealWinner, _revealPodium);
+      } else if (_analyticsReceived) {
+        // analytics_update arrived before this phase_update
+        renderWinnerReveal(null, _revealWinner, _revealPodium);
+      } else {
+        showRevealLoading();
+      }
+      break;
+  }
+});
+
+socket.on('analytics_update', data => {
+  if (data.round_id !== undefined && data.round_id !== _currentRoundId) return;
+  if (data.winner !== undefined) _revealWinner = data.winner;
+  if (data.podium !== undefined) _revealPodium = data.podium;
+  _analyticsReceived = true;
+  const revealView = document.getElementById('v-reveal');
+  if (revealView && revealView.classList.contains('active')) {
+    clearRevealTimers();
+    renderWinnerReveal(data.stats, _revealWinner, _revealPodium);
+  }
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(id)?.classList.add('active');
+}
+
+function syncPhaseButtons(ph) {
+  document.querySelectorAll('.ctrl-btn[id^="btn-"]').forEach(b => {
+    b.classList.remove('active-phase');
+    if (b.id !== 'btn-setup') b.disabled = (ph === 'setup');
+  });
+  document.getElementById('btn-' + ph)?.classList.add('active-phase');
+}
+
+function updateTensionCounter(submitted) {
+  const el = document.getElementById('tensionCounter');
+  el.textContent = `${submitted} of ${totalConnected} submitted`;
+  if (submitted > 0 && submitted >= totalConnected) el.classList.add('all-in');
+  else el.classList.remove('all-in');
+}
+
+function updateThemeLabels() {
+  // Waiting badge
+  const wb = document.getElementById('waitingThemeBadge');
+  if (currentTheme) { wb.textContent = currentTheme; wb.style.display = 'block'; }
+  else wb.style.display = 'none';
+
+  // Reading label
+  const rl = document.getElementById('readingThemeLbl');
+  if (currentTheme) { rl.textContent = `Transform into: ${currentTheme}`; rl.style.display = 'block'; }
+  else rl.style.display = 'none';
+
+  // Erasing label
+  const el = document.getElementById('erasingThemeLbl');
+  if (currentTheme) { el.textContent = `Transform into: ${currentTheme}`; el.style.display = 'block'; }
+  else el.style.display = 'none';
+
+  // Cycle label
+  const cl = document.getElementById('cycleThemeLbl');
+  if (currentTheme) { cl.textContent = `Theme: ${currentTheme}`; cl.style.display = 'block'; }
+  else cl.style.display = 'none';
+}
+
+function computeErasureCounts() {
+  const counts = new Array(WORDS.length).fill(0);
+  ALL_SUBMISSIONS.forEach(sub => {
+    (sub.erased || []).forEach(i => {
+      const idx = Number(i);
+      if (idx >= 0 && idx < WORDS.length) counts[idx]++;
+    });
+  });
+  return counts;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+function startSession() {
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) { alert('Please enter text.'); return; }
+  socket.emit('set_text', { text });
+}
+function setPhase(p) { socket.emit('set_phase', { phase: p }); }
+function confirmReveal() {
+  if (confirm('Show the Reveal now? This cannot be undone mid-session.'))
+    setPhase('reveal');
+}
+function newRound()  {
+  if (confirm('Start a new round? Everyone stays connected, submissions are cleared.'))
+    socket.emit('new_round');
+}
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen?.();
+}
+
+// ── Read view ─────────────────────────────────────────────────────────────────
+function populateReadView() {
+  const area = document.getElementById('stageReadText');
+  area.innerHTML = '';
+  WORDS.forEach((w, i) => {
+    if (LINE_BREAKS.has(i)) area.appendChild(document.createElement('br'));
+    area.appendChild(document.createTextNode(w + ' '));
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THEME SELECTION
+// ══════════════════════════════════════════════════════════════════════════════
+function populateThemeGrid() {
+  const grid = document.getElementById('themeGrid');
+  grid.innerHTML = '';
+  THEMES.forEach(name => {
+    const btn = document.createElement('button');
+    btn.className = 'theme-btn';
+    btn.textContent = name;
+    btn.dataset.theme = name;
+    btn.onclick = () => selectTheme(name);
+    grid.appendChild(btn);
+  });
+}
+
+function highlightCurrentTheme() {
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.theme === currentTheme);
+  });
+}
+
+function selectTheme(name) {
+  // Highlight immediately for visual feedback
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.theme === name);
+  });
+  // Emit — server sets theme and advances to reading
+  socket.emit('select_theme', { theme: name });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CYCLE — WORD CLOUD
+// ══════════════════════════════════════════════════════════════════════════════
+function getTiers(words) {
+  const n = words.length;
+  if (n === 0) return [[], [], [], []];
+  const t0 = Math.max(1, Math.min(3,  Math.ceil(n * 0.10)));
+  const t1 = Math.max(t0 + 1, Math.min(t0 + 5, Math.ceil(n * 0.28)));
+  const t2 = Math.max(t1 + 1, Math.min(t1 + 10, Math.ceil(n * 0.62)));
+  return [words.slice(0, t0), words.slice(t0, t1), words.slice(t1, t2), words.slice(t2)];
+}
+
+function renderErasureAnalytics() {
+  const n = ALL_SUBMISSIONS.length;
+  const erasureCounts = computeErasureCounts();
+
+  const erasedWords = WORDS
+    .map((w, i) => ({ word: w, count: erasureCounts[i], rate: n > 0 ? erasureCounts[i] / n : 0 }))
+    .filter(w => w.count > 0)
+    .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word));
+
+  const totalErasures = erasedWords.reduce((s, w) => s + w.count, 0);
+
+  const top = erasedWords[0];
+
+  // Stagger stat cards in one by one (Kahoot energy)
+  const cardAnimations = [
+    () => animateNum('dashTotal',   totalErasures),
+    () => animateNum('dashUnique',  erasedWords.length),
+    () => animateNum('dashReaders', n),
+    () => { document.getElementById('dashTopWord').textContent = top ? `"${top.word}"` : '—'; },
+  ];
+  document.querySelectorAll('#v-cycle .dash-card').forEach((card, i) => {
+    card.style.transition = 'none';
+    card.style.opacity    = '0';
+    card.style.transform  = 'translateY(14px)';
+    setTimeout(() => {
+      card.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+      card.style.opacity    = '1';
+      card.style.transform  = 'translateY(0)';
+      if (cardAnimations[i]) cardAnimations[i]();
+    }, 200 + i * 220);
+  });
+
+  // Word cloud
+  const cloud = document.getElementById('wordCloud');
+  cloud.innerHTML = '';
+
+  if (erasedWords.length === 0) {
+    cloud.innerHTML = '<div class="wc-empty">No words erased yet.</div>';
+    return;
+  }
+
+  const tiers = getTiers(erasedWords);
+  let delay = 1700; // start after all 4 stat cards have animated in
+
+  tiers.forEach((words, tierIdx) => {
+    if (words.length === 0) return;
+    const tierEl = document.createElement('div');
+    tierEl.className = `wc-tier wc-tier-${tierIdx}`;
+
+    words.forEach(item => {
+      const span = document.createElement('span');
+      span.className = 'wc-word';
+      span.style.animationDelay = delay + 'ms';
+      const showBadge = tierIdx < 3;
+      span.innerHTML = escHtml(item.word) + (showBadge ? `<sup class="wc-count">${item.count}</sup>` : '');
+      tierEl.appendChild(span);
+      delay += 55;
+    });
+
+    cloud.appendChild(tierEl);
+  });
+}
+
+function animateNum(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const start = parseInt(el.textContent) || 0;
+  if (start === target) { el.textContent = target; return; }
+  const duration  = 700;
+  const t0 = performance.now();
+  const tick = now => {
+    const p = Math.min((now - t0) / duration, 1);
+    el.textContent = Math.round(start + (target - start) * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// REVEAL — 3-PHASE PROGRESSIVE ERASURE
+// ══════════════════════════════════════════════════════════════════════════════
+function clearRevealTimers() {
+  _revealTimers.forEach(t => clearTimeout(t));
+  _revealTimers = [];
+}
+
+function showRevealLoading() {
+  const area = document.getElementById('revealArea');
+  const podiumSection = document.getElementById('podiumSection');
+  podiumSection.classList.remove('visible');
+  podiumSection.style.display = 'none';
+  area.innerHTML = '<div class="reveal-loading">Computing results…</div>';
+  area.style.display = 'block';
+  area.style.opacity = '1';
+  setPip(0, []);
+  setRevealLabel('Rankings');
+}
+
+function revealTimer(fn, ms) {
+  const t = setTimeout(fn, ms);
+  _revealTimers.push(t);
+}
+
+function setPip(active, complete) {
+  [0, 1, 2, 3].forEach(i => {
+    const pip = document.getElementById('pip' + i);
+    if (!pip) return;
+    pip.classList.remove('active', 'complete');
+    if (i === active)              pip.classList.add('active');
+    else if (complete.includes(i)) pip.classList.add('complete');
+  });
+}
+
+function setRevealLabel(text) {
+  const el = document.getElementById('revealPhaseLbl');
+  el.style.opacity = '0';
+  setTimeout(() => { el.textContent = text; el.style.opacity = '1'; }, 280);
+}
+
+function renderPodium(podium) {
+  if (!podium || podium.length === 0) return;
+  const section = document.getElementById('podiumSection');
+  section.style.display = 'flex';
+  const row = document.getElementById('podiumRow');
+  row.innerHTML = '';
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  // Visual order: 2nd | 1st | 3rd; animation order: 3rd→2nd→1st
+  const layout = [
+    podium[1] ? { data: podium[1], rank: 2 } : null,
+    podium[0] ? { data: podium[0], rank: 1 } : null,
+    podium[2] ? { data: podium[2], rank: 3 } : null,
+  ];
+  layout.forEach(item => {
+    if (!item) return;
+    const { data, rank } = item;
+    const el = document.createElement('div');
+    el.className = `podium-entry rank-${rank}`;
+    el.dataset.rank = rank;
+    el.innerHTML = `
+      <div class="podium-medal">${medals[rank]}</div>
+      <div class="podium-name">${escHtml(data.name || 'Anonymous')}</div>
+      <div class="podium-score-num" id="podiumScore${rank}">0</div>
+      <div class="podium-score-lbl">points</div>
+      <div class="podium-plinth"></div>
+    `;
+    row.appendChild(el);
+  });
+  // Animate 3rd→2nd→1st with staggered delays
+  revealTimer(() => {
+    section.classList.add('visible');
+    const third = row.querySelector('.rank-3');
+    if (third) { third.classList.add('visible'); if (podium[2]) animateNum('podiumScore3', Math.round(podium[2].score)); }
+  }, 500);
+  revealTimer(() => {
+    const second = row.querySelector('.rank-2');
+    if (second) { second.classList.add('visible'); if (podium[1]) animateNum('podiumScore2', Math.round(podium[1].score)); }
+  }, 2200);
+  revealTimer(() => {
+    const first = row.querySelector('.rank-1');
+    if (first) { first.classList.add('visible'); if (podium[0]) animateNum('podiumScore1', Math.round(podium[0].score)); }
+  }, 4000);
+}
+
+function renderWinnerReveal(stats, winner, podium) {
+  clearRevealTimers();
+
+  const area          = document.getElementById('revealArea');
+  const podiumSection = document.getElementById('podiumSection');
+  area.innerHTML = '';
+  area.style.display = 'none';
+  area.style.opacity = '0';
+  podiumSection.classList.remove('visible');
+  podiumSection.style.display = 'none';
+  document.getElementById('scoreCard').classList.remove('visible');
+
+  const badge = document.getElementById('revealThemeBadge');
+  badge.style.opacity = '0';
+  badge.style.display = currentTheme ? 'inline-block' : 'none';
+  if (currentTheme) badge.textContent = `Transformed into: ${currentTheme}`;
+
+  setPip(0, []);
+  setRevealLabel('Rankings');
+  renderPodium(podium || []);
+
+  const PODIUM_DURATION = 7000;
+
+  revealTimer(() => {
+    podiumSection.classList.remove('visible');
+    revealTimer(() => { podiumSection.style.display = 'none'; }, 700);
+    area.style.display = 'block';
+    requestAnimationFrame(() => requestAnimationFrame(() => { area.style.opacity = '1'; }));
+
+    if (!winner || !winner.erased) {
+      area.innerHTML = '<div class="reveal-empty">No submissions yet.</div>';
+      setPip(1, [0]);
+      setRevealLabel('Original Text');
+      return;
+    }
+
+    const willRemove = buildRemovalSet(winner);
+    const lines      = buildLines();
+    const allSpans   = [];
+
+    lines.forEach(line => {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'poem-line-reveal';
+      line.forEach(({ word, idx }) => {
+        const span = document.createElement('span');
+        span.className = 'reveal-word';
+        span.textContent = word;
+        lineEl.appendChild(span);
+        lineEl.appendChild(document.createTextNode(' '));
+        allSpans.push({ span, idx, willRemove: willRemove[idx] });
+      });
+      area.appendChild(lineEl);
+    });
+
+    const removalQueue = allSpans.filter(s => s.willRemove);
+    const total   = removalQueue.length;
+    const perWord = total > 0 ? Math.max(45, Math.min(380, 8000 / total)) : 180;
+
+    setPip(1, [0]);
+    setRevealLabel('Original Text');
+
+    revealTimer(() => {
+      setPip(2, [0, 1]);
+      setRevealLabel('Winning Erasures');
+      removalQueue.forEach(({ span }) => span.classList.add('marking'));
+    }, 4000);
+
+    revealTimer(() => {
+      setPip(3, [0, 1, 2]);
+      setRevealLabel('The Winning Poem');
+      removalQueue.forEach(({ span }, i) => {
+        revealTimer(() => {
+          span.classList.remove('marking');
+          span.classList.add('erased');
+        }, i * perWord);
+      });
+      revealTimer(() => {
+        renderScoreCard(winner);
+        document.getElementById('scoreCard').classList.add('visible');
+        if (currentTheme) badge.style.opacity = '1';
+      }, total * perWord + 1000);
+    }, 4000 + 2500);
+
+  }, PODIUM_DURATION);
+}
+function renderScoreCard(winner) {
+  if (!winner || winner.score == null) return;
+
+  const nameEl = document.getElementById('scoreWinnerName');
+  if (nameEl) nameEl.textContent = winner.name || 'Anonymous';
+  document.getElementById('scoreTotalNum').textContent = Math.round(winner.score);
+
+  const grid = document.getElementById('scoreBreakdown');
+  grid.innerHTML = '';
+
+  const breakdown = winner.breakdown || {};
+  const metrics = [
+    { key: 'theme_alignment', label: 'Theme' },
+    { key: 'coherence',       label: 'Coherence' },
+    { key: 'readability',     label: 'Readability' },
+    { key: 'economy',         label: 'Economy' },
+  ];
+
+  metrics.forEach(({ key, label }) => {
+    const val = breakdown[key] ?? 0;
+
+    const lbl = document.createElement('div');
+    lbl.className = 'sc-lbl'; lbl.textContent = label;
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'sc-bar-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'sc-bar';
+    barWrap.appendChild(bar);
+
+    const num = document.createElement('div');
+    num.className = 'sc-val'; num.textContent = Math.round(val);
+
+    grid.appendChild(lbl);
+    grid.appendChild(barWrap);
+    grid.appendChild(num);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      bar.style.width = Math.round(val) + '%';
+    }));
+  });
+}
+
+function buildLines() {
+  const lines = [];
+  let current = [];
+  WORDS.forEach((word, idx) => {
+    if (LINE_BREAKS.has(idx) && current.length > 0) {
+      lines.push(current);
+      current = [];
+    }
+    current.push({ word, idx });
+  });
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
+
+function buildRemovalSet(winner) {
+  if (winner && winner.erased) {
+    const erasedSet = new Set(winner.erased.map(Number));
+    return WORDS.map((_, i) => erasedSet.has(i));
+  }
+  return WORDS.map(() => false);
+}
+
+function downloadPoem() {
+  const removal = buildRemovalSet(_revealWinner);
+
+  let text = 'Living Reading — Winning Poem\n';
+  if (_revealWinner?.name) text += `Author: ${_revealWinner.name}\n`;
+  if (currentTheme) text += `Theme: ${currentTheme}\n`;
+  if (_revealWinner?.score != null) text += `Score: ${Math.round(_revealWinner.score)}\n`;
+  text += '\n';
+
+  const lines = buildLines();
+  lines.forEach(line => {
+    const lineText = line.filter(({ idx }) => !removal[idx]).map(({ word }) => word).join(' ');
+    if (lineText.trim()) text += lineText + '\n';
+  });
+
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: 'living-reading-poem.txt' });
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
